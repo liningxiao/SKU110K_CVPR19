@@ -59,11 +59,13 @@ class DuplicateMerger(object):
 
         # TODO time optimization: split into initial clusters using gaussian information rather than heatmap contours
         heat_map = numpy.zeros(shape=[image.shape[0], image.shape[1], 1], dtype=numpy.float64)
+        #检测出的框缩小后，按照iou分数求按照高斯分布的热图
         original_detection_centers = self.shrink_boxes(data, heat_map)
 
         cv2.normalize(heat_map, heat_map, 0, 255, cv2.NORM_MINMAX)
         heat_map = cv2.convertScaleAbs(heat_map)
         h2, heat_map = cv2.threshold(heat_map, 4, 255, cv2.THRESH_TOZERO)
+        #得到热图的轮廓
         contours = cv2.findContours(numpy.ndarray.copy(heat_map), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
         candidates = self.find_new_candidates(contours, heat_map, data, original_detection_centers, image)
@@ -110,16 +112,20 @@ class DuplicateMerger(object):
 
     def find_new_candidates(self, contours, heat_map, data, original_detection_centers, image):
         candidates = []
+        #对热图中的每个轮廓操作
         for contour_i, contour in enumerate(contours[1]):
+            #得到轮廓的外界矩形
             contour_bounding_rect = cv2.boundingRect(contour)
 
             contour_bbox = extract_boxes_from_edge_boxes(numpy.array(contour_bounding_rect))[0]
             box_width = contour_bbox[BOX.X2] - contour_bbox[BOX.X1]
             box_height = contour_bbox[BOX.Y2] - contour_bbox[BOX.Y1]
             contour_area = cv2.contourArea(contour)
+            #外界矩形的左上角点
             offset = contour_bbox[0:2]
             mu = None
             cov = None
+            #得到属于轮廓外界矩形内的所有中心点
             original_indexes = self.get_contour_indexes(contour, contour_bbox, original_detection_centers['x'],
                                                         original_detection_centers['y'])
         
@@ -146,6 +152,7 @@ class DuplicateMerger(object):
                         print (n, k, ' k<=Params.min_k or EM failed')
                         self.perform_nms(candidates, contour_i, curr_data)
                     else:  # successful EM
+                        #移除满足条件的距离太近的点
                         cov, mu, num, roi = self.remove_redundant(contour_bbox, cov, k, mu, image, sub_heat_map)
                         self.set_candidates(candidates, cov, heat_map, mu, num, offset, roi, sub_heat_map)
                 elif (k == n):
@@ -200,6 +207,7 @@ class DuplicateMerger(object):
             ellipse_mask = cv2.fillPoly(local_m, [poly], (1, 1, 1))
             contours = cv2.findContours(ellipse_mask.copy(), cv2.RETR_EXTERNAL,
                                         cv2.CHAIN_APPROX_SIMPLE)
+            #每个点为中心的高斯分布的椭圆轮廓
             cnts.append(contours[1][0])
         center_points = mu.copy()
         distances = scipy.spatial.distance.cdist(center_points, center_points)
@@ -211,12 +219,15 @@ class DuplicateMerger(object):
                     continue
                 cnt_i = cnts[i]
                 cnt_j = cnts[j]
+                #点到椭圆的最短距离
                 ct_i_to_pt_j = -cv2.pointPolygonTest(cnt_i, (mu[j][0], mu[j][1]), measureDist=True)
                 ct_j_to_pt_i = -cv2.pointPolygonTest(cnt_j, (mu[i][0], mu[i][1]), measureDist=True)
+                #i点或者j点有一点在另一个椭圆区域内，后续应该移除
                 if ct_i_to_pt_j <= 0 or ct_j_to_pt_i <= 0:
                     scaled_distances[i, j] = -numpy.inf
                 else:
                     pt_dist = distances[i, j]
+                    #计算两个椭圆之间的距离
                     ct_i_to_ct_j = ct_i_to_pt_j - pt_dist + ct_j_to_pt_i
                     scaled_distances[i, j] = ct_i_to_ct_j
         scaled_distances = numpy.triu(scaled_distances)
@@ -225,6 +236,7 @@ class DuplicateMerger(object):
         for i, j in zip(i_s, j_s):
             if scaled_distances[i, j] >= 0:
                 break
+            #移除更不靠近中心的点
             if i not in to_remove and j not in to_remove:
                 pt_i = center_points[i]
                 pt_j = center_points[j]
@@ -291,6 +303,7 @@ class DuplicateMerger(object):
         w_shift = ((width * (1 - Params.box_size_factor)) / 2.).astype(numpy.int32)
         h_shift = ((height * (1 - Params.box_size_factor)) / 2.).astype(numpy.int32)
 
+        #将boxes缩小到(Params.box_size_factor*w,Params.box_size_factor*h)
         boxes.x1 += w_shift
         boxes.x2 -= w_shift
         boxes.y1 += h_shift

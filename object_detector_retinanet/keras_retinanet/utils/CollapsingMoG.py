@@ -26,7 +26,7 @@ class Timeout():
 
 
 def agglomerative_init(alpha, mu, covariance, n, k):
-
+    #选出距离最小的k个mu和alpha
     mu_stack = numpy.zeros(shape=[n - k, mu.shape[1]], dtype=mu.dtype)
     mu_stack.fill(numpy.inf)
     mu_temp = numpy.vstack([mu.copy(), mu_stack])
@@ -96,15 +96,17 @@ def collapse(original_detection_centers, k, offset, max_iter=100, epsilon=1e-100
     try:
         with Timeout(3):
             n = original_detection_centers.shape[0]
+            #在缩小后框的左上角点为原点下的坐标作为mu
             mu_x = original_detection_centers.x - offset[0]
             mu_y = original_detection_centers.y - offset[1]
+            #检测出的框经过缩小后，宽的一半为sigmax，高的一般为sigmay
             sigma_xx = original_detection_centers.sigma_x * original_detection_centers.sigma_x
             sigma_yy = original_detection_centers.sigma_y * original_detection_centers.sigma_y
 
             alpha = numpy.array(original_detection_centers.confidence / original_detection_centers.confidence.sum())
             mu = numpy.array([mu_x.values, mu_y.values]).transpose()
             covariance = numpy.array([[sigma_xx.values, sigma_xx.values * 0], [0 * sigma_yy.values, sigma_yy.values]]).transpose()
-
+            #将n个点进行聚类出k个点作为初始的聚类中心点
             beta, mu_prime, covariance_prime = agglomerative_init(alpha.copy(), mu.copy(), covariance.copy(), n, k)
     except Timeout.Timeout:
         print ("agglomerative_init Timeout - using fallback")
@@ -127,6 +129,7 @@ def collapse(original_detection_centers, k, offset, max_iter=100, epsilon=1e-100
 
                 prev_d_val = d_val
                 d_val = 0
+                #计算进过mstep更新后的聚类分布与各原始分布的距离
                 for t, (alpha_, mu_, cov_) in enumerate(zip(alpha, mu, covariance)):
                     min_dist, selected_cluster = min_kl(beta, cov_, covariance_prime, mu_, mu_prime)
                     min_kl_cache[t] = (min_dist, selected_cluster)
@@ -142,6 +145,7 @@ def collapse(original_detection_centers, k, offset, max_iter=100, epsilon=1e-100
                 return beta_init, mu_prime_init, covariance_prime_init
     except Timeout.Timeout:
         print ("EM Timeout - using fallback")
+    #得到最终得到的聚类分布
     return beta, mu_prime, covariance_prime
 
 
